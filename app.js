@@ -1,6 +1,6 @@
 /* ============================================================
    FF14 Lookbook v2 — app.js
-   - Garland Tools API 아이템 검색 + 아이콘
+   - 로컬 JSON DB 아이템 검색 (한국어/영어/일본어)
    - 드래그 가능한 글램 카드 (이미지 위 오버레이)
    - localStorage 자동 저장
    - 솔로 / 페어 모드
@@ -9,10 +9,31 @@
 'use strict';
 
 // ── 상수 ─────────────────────────────────────────────────────
-const GARLAND_SEARCH = 'https://www.garlandtools.org/api/search.php';
-const GARLAND_ITEM   = 'https://www.garlandtools.org/db/data/item/';
-const XIVAPI_ICON    = 'https://xivapi.com';
-const STORAGE_KEY    = 'ff14_lookbook_v2';
+const STORAGE_KEY = 'ff14_lookbook_v2';
+
+// ── 로컬 아이템 DB ───────────────────────────────────────────
+// items-ko.json / items-en.json / items-ja.json 로드 상태
+const ITEM_DB = { ko: null, en: null, ja: null };
+let dbLoadPromise = null;
+
+async function loadItemDB() {
+  if (dbLoadPromise) return dbLoadPromise;
+  dbLoadPromise = (async () => {
+    const langs = ['ko', 'en', 'ja'];
+    await Promise.all(langs.map(async lang => {
+      try {
+        const res = await fetch(`items-${lang}.json`);
+        if (res.ok) {
+          ITEM_DB[lang] = await res.json();
+          console.log(`items-${lang}.json 로드: ${ITEM_DB[lang].length}개`);
+        }
+      } catch(e) {
+        console.warn(`items-${lang}.json 없음 — 온라인 검색으로 fallback`);
+      }
+    }));
+  })();
+  return dbLoadPromise;
+}
 
 const SLOTS = ['머리','몸통','손','다리','발','무기','귀걸이','목걸이','팔찌','반지1','반지2','얼굴장식'];
 
@@ -450,103 +471,79 @@ function detectLang(query) {
   return 'en';
 }
 
-// XIVAPI v2 — 현재 유일하게 안정적인 공개 FF14 API
-// 한국어: sheet 파라미터로 Korean 컬럼 지정
 async function searchItems(query) {
-  if (!query.trim()) return;
+  query = query.trim();
+  if (!query) return;
+
   const results = document.getElementById('modal-results');
   results.innerHTML = '<div class="modal-loading">검색 중...</div>';
 
   const lang = detectLang(query);
 
-  try {
-    let items = await searchXivapiV2(query, lang);
+  // ── 1. 로컬 DB 검색 (items-*.json 있을 때) ──
+  await loadItemDB();
+  if (ITEM_DB[lang]) {
+    const q = query.toLowerCase();
+    const hits = ITEM_DB[lang]
+      .filter(item => item.name.toLowerCase().includes(q))
+      .slice(0, 30);
 
-    // 한국어 결과 없으면 영어로 재시도
-    if (items.length === 0 && lang === 'ko') {
-      items = await searchXivapiV2(query, 'en');
-    }
-
-    if (items.length === 0) {
-      results.innerHTML = `<div class="modal-hint">결과가 없어요.<br>검색 팁: 한국판 공식 이름으로 검색해보세요.<br>예) 뱅가드 스카우트 볼레로</div>`;
+    if (hits.length > 0) {
+      renderResults(hits, results);
       return;
     }
+    // 로컬 DB에 없으면 아래 온라인 fallback
+  }
 
+  // ── 2. 온라인 fallback (로컬 DB 없을 때) ──
+  results.innerHTML = '<div class="modal-loading">온라인 검색 중...<br><small style="color:#555">items-*.json 파일이 없어서 온라인으로 검색해요</small></div>';
+  try {
+    const items = await searchOnline(query, lang);
+    if (items.length === 0) {
+      results.innerHTML = `<div class="modal-hint">결과가 없어요.<br>
+        <small>💡 fetch-items.html을 실행하면 로컬 DB가 만들어져서<br>한국어 검색이 빠르고 정확해집니다.</small></div>`;
+      return;
+    }
     renderResults(items, results);
   } catch(e) {
-    results.innerHTML = `<div class="modal-hint">검색 오류가 발생했어요.<br><small>${e.message}</small></div>`;
-    console.error(e);
+    results.innerHTML = `<div class="modal-hint">검색 오류: ${e.message}<br>
+      <small>fetch-items.html로 로컬 DB를 먼저 만들어보세요.</small></div>`;
   }
 }
 
-async function searchXivapiV2(query, lang) {
-  // XIVAPI v2 시트 검색 — 한/영/일 모두 지원
-  // 언어별 컬럼명: ko=Name_ko, ja=Name_ja, en=Name
-  const langMap = { ko: 'chs', ja: 'ja', en: 'en' };
-  // v2 엔드포인트: /v1/search (2024년 이후 공식)
-  const apiLang = langMap[lang] || 'en';
-
-  // 방법1: v1/search (신규)
-  try {
-    const url = `https://v2.xivapi.com/api/1/search?query=${encodeURIComponent(query)}&sheets=Item&language=${apiLang}&limit=20`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      const hits = data.results || [];
-      if (hits.length > 0) {
-        return hits.map(h => {
-          const fields = h.fields || {};
-          const name = fields.Name || fields.Name_en || h.id || '?';
-          const iconId = fields.Icon?.id || fields.Icon || null;
-          return {
-            id:     h.row_id || h.id,
-            name,
-            iconId,
-            iconUrl: iconId ? `https://v2.xivapi.com/api/1/asset/ui/icon/${String(iconId).slice(0,3)}000/${String(iconId).padStart(6,'0')}_hr1.tex?format=png` : '',
-          };
-        }).filter(i => i.name && i.name !== '?');
-      }
-    }
-  } catch(e) { console.warn('v2 search failed:', e); }
-
-  // 방법2: 구 XIVAPI v1 fallback
-  try {
-    const langParam = lang === 'ko' ? 'Korean' : lang === 'ja' ? 'Japanese' : 'English';
-    const url = `https://xivapi.com/search?string=${encodeURIComponent(query)}&indexes=Item&language=${langParam}&limit=20&columns=ID,Name,Icon`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      const hits = data.Results || [];
-      return hits.map(item => ({
-        id:     item.ID,
-        name:   item.Name,
-        iconId: null,
-        iconUrl: item.Icon ? `https://xivapi.com${item.Icon}` : '',
-      })).filter(i => i.name);
-    }
-  } catch(e) { console.warn('xivapi v1 failed:', e); }
-
-  return [];
+// 온라인 fallback — XIVAPI v1
+async function searchOnline(query, lang) {
+  const langParam = { ko: 'Korean', ja: 'Japanese', en: 'English' }[lang] || 'English';
+  const url = `https://xivapi.com/search?string=${encodeURIComponent(query)}&indexes=Item&language=${langParam}&limit=20&columns=ID,Name,Icon`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return (data.Results || []).map(item => ({
+    id:   item.ID,
+    name: item.Name,
+    icon: item.Icon ? `https://xivapi.com${item.Icon}` : '',
+  }));
 }
 
-// 결과 DOM 렌더
+// 결과 렌더
 function renderResults(items, container) {
-  container.innerHTML = items.map(item => {
-    const iconSrc = item.iconUrl || '';
-    return `
-      <div class="result-item"
-        data-id="${item.id}"
-        data-name="${escHtml(item.name)}"
-        data-icon-url="${escHtml(iconSrc)}">
-        <div class="result-item__icon">
-          ${iconSrc ? `<img src="${iconSrc}" onerror="this.style.display='none'" crossorigin="anonymous"/>` : ''}
-        </div>
-        <div class="result-item__info">
-          <div class="result-item__name">${escHtml(item.name)}</div>
-          <div class="result-item__sub">ID: ${item.id}</div>
-        </div>
-      </div>`;
-  }).join('');
+  if (items.length === 0) {
+    container.innerHTML = '<div class="modal-hint">결과가 없어요.</div>';
+    return;
+  }
+  container.innerHTML = items.map(item => `
+    <div class="result-item"
+      data-id="${item.id}"
+      data-name="${escHtml(item.name)}"
+      data-icon-url="${escHtml(item.icon || '')}">
+      <div class="result-item__icon">
+        ${item.icon ? `<img src="${escHtml(item.icon)}" onerror="this.style.display='none'" crossorigin="anonymous"/>` : ''}
+      </div>
+      <div class="result-item__info">
+        <div class="result-item__name">${escHtml(item.name)}</div>
+        <div class="result-item__sub">ID: ${item.id}</div>
+      </div>
+    </div>`).join('');
 
   container.querySelectorAll('.result-item').forEach(el => {
     el.addEventListener('click', () => {
@@ -781,6 +778,7 @@ function bindEvents() {
 // ============================================================
 function init() {
   loadFromStorage();
+  loadItemDB(); // 백그라운드에서 미리 로드
   bindEvents();
   renderGallery();
   renderSidebar();
