@@ -49,10 +49,10 @@ function loadFromStorage() {
   } catch(e) { state.looks = []; }
 }
 
-function iconUrl(iconPath) {
-  if (!iconPath) return null;
-  // Garland Tools 아이콘 경로 → xivapi cdn
-  const num = String(iconPath).padStart(6, '0');
+function iconUrl(item) {
+  if (item.iconUrl) return item.iconUrl;
+  if (!item.icon) return null;
+  const num = String(item.icon).padStart(6, '0');
   const folder = num.slice(0, 3) + '000';
   return `${XIVAPI_ICON}/i/${folder}/${num}.png`;
 }
@@ -254,7 +254,7 @@ function renderSlotsFor(containerId, sideKey) {
       <div class="slot-row ${isFilled ? 'filled' : ''}" data-side="${sideKey}" data-slot="${slot}">
         <span class="slot-row__label">${slot}</span>
         <div class="slot-row__icon">
-          ${isFilled && item.icon ? `<img src="${iconUrl(item.icon)}" onerror="this.style.display='none'"/>` : '＋'}
+          ${isFilled && (item.icon||item.iconUrl) ? `<img src="${iconUrl(item)}" onerror="this.style.display='none'"/>` : '＋'}
         </div>
         <div class="slot-row__info">
           ${isFilled
@@ -349,8 +349,8 @@ function renderGlamCards(layerId, sideKey) {
 
       card.innerHTML = `
         <div class="glam-card__icon">
-          ${item.icon
-            ? `<img src="${iconUrl(item.icon)}" onerror="this.parentElement.innerHTML='<div class=glam-card__icon-placeholder>${slot}</div>'"/>`
+          ${(item.icon||item.iconUrl)
+            ? `<img src="${iconUrl(item)}" onerror="this.parentElement.innerHTML='<div class=glam-card__icon-placeholder>${slot}</div>'"/>`
             : `<div class="glam-card__icon-placeholder">${slot}</div>`}
         </div>
         <div class="glam-card__info">
@@ -447,57 +447,128 @@ function openItemModal(sideKey, slotName) {
   setTimeout(() => document.getElementById('modal-search-input').focus(), 50);
 }
 
+// 언어 감지: 한글 포함 여부
+function detectLang(query) {
+  if (/[\uAC00-\uD7A3]/.test(query)) return 'ko';
+  if (/[\u3040-\u30FF\u4E00-\u9FFF]/.test(query)) return 'ja';
+  return 'en';
+}
+
 async function searchItems(query) {
   if (!query.trim()) return;
   const results = document.getElementById('modal-results');
   results.innerHTML = '<div class="modal-loading">검색 중...</div>';
 
-  try {
-    // Garland Tools 검색
-    const url = `${GARLAND_SEARCH}?text=${encodeURIComponent(query)}&lang=en&type=item`;
-    const res = await fetch(url);
-    const data = await res.json();
+  const lang = detectLang(query);
 
-    // 최대 20개
-    const items = (data || []).slice(0, 20);
+  try {
+    let items = [];
+
+    if (lang === 'ko') {
+      // 한국어: XIVAPI 검색 사용 (한국어 지원)
+      items = await searchXivapi(query, 'Korean');
+      // 결과 없으면 영어로도 시도
+      if (items.length === 0) {
+        items = await searchGarland(query, 'en');
+      }
+    } else if (lang === 'ja') {
+      // 일본어: Garland ja + XIVAPI Japanese 병렬
+      const [g, x] = await Promise.allSettled([
+        searchGarland(query, 'ja'),
+        searchXivapi(query, 'Japanese'),
+      ]);
+      const gItems = g.status === 'fulfilled' ? g.value : [];
+      const xItems = x.status === 'fulfilled' ? x.value : [];
+      items = mergeResults(gItems, xItems);
+    } else {
+      // 영어: Garland 기본
+      items = await searchGarland(query, 'en');
+    }
 
     if (items.length === 0) {
-      results.innerHTML = '<div class="modal-hint">결과가 없어요. 영어로도 시도해보세요.</div>';
+      results.innerHTML = `<div class="modal-hint">결과가 없어요.<br>다른 키워드나 영어 이름으로 시도해보세요.</div>`;
       return;
     }
 
-    results.innerHTML = items.map(item => {
-      const iconNum = String(item.icon || '').padStart(6, '0');
-      const iconFolder = iconNum.slice(0, 3) + '000';
-      const iconSrc = item.icon ? `${XIVAPI_ICON}/i/${iconFolder}/${iconNum}.png` : '';
-      return `
-        <div class="result-item" data-id="${item.id}" data-name="${escHtml(item.name)}" data-icon="${item.icon||''}">
-          <div class="result-item__icon">
-            ${iconSrc ? `<img src="${iconSrc}" onerror="this.style.display='none'"/>` : ''}
-          </div>
-          <div class="result-item__info">
-            <div class="result-item__name">${escHtml(item.name)}</div>
-            <div class="result-item__sub">ID: ${item.id}</div>
-          </div>
-        </div>`;
-    }).join('');
-
-    results.querySelectorAll('.result-item').forEach(el => {
-      el.addEventListener('click', () => {
-        results.querySelectorAll('.result-item').forEach(r => r.classList.remove('selected'));
-        el.classList.add('selected');
-        modalCtx.selectedItem = {
-          name: el.dataset.name,
-          icon: el.dataset.icon,
-        };
-        document.getElementById('modal-dye-row').style.display = 'flex';
-      });
-    });
+    renderResults(items, results);
 
   } catch(e) {
-    results.innerHTML = '<div class="modal-hint">검색 오류. 네트워크를 확인해주세요.</div>';
+    results.innerHTML = '<div class="modal-hint">검색 오류. 잠시 후 다시 시도해주세요.</div>';
     console.error(e);
   }
+}
+
+// Garland Tools 검색
+async function searchGarland(query, lang) {
+  const url = `${GARLAND_SEARCH}?text=${encodeURIComponent(query)}&lang=${lang}&type=item`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data || []).slice(0, 20).map(item => ({
+    id:   item.id,
+    name: item.name,
+    icon: item.icon || '',
+    sub:  '',
+  }));
+}
+
+// XIVAPI 검색 (한국어/일본어 지원)
+async function searchXivapi(query, language) {
+  // XIVAPI v2 search
+  const url = `https://xivapi.com/search?string=${encodeURIComponent(query)}&indexes=Item&language=${language}&limit=20`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const data = await res.json();
+  const hits = data.Results || [];
+  return hits.map(item => ({
+    id:   item.ID,
+    name: item.Name,
+    icon: item.Icon ? item.Icon.replace('/i/', '').replace('.png', '').replace(/\//g, '') : '',
+    iconUrl: item.Icon ? `https://xivapi.com${item.Icon}` : '',
+    sub: '',
+  }));
+}
+
+// 중복 제거 병합 (id 기준)
+function mergeResults(a, b) {
+  const seen = new Set(a.map(i => i.id));
+  return [...a, ...b.filter(i => !seen.has(i.id))].slice(0, 20);
+}
+
+// 결과 DOM 렌더
+function renderResults(items, container) {
+  container.innerHTML = items.map(item => {
+    // iconUrl이 있으면 직접 사용, 없으면 icon 번호로 조합
+    let iconSrc = item.iconUrl || '';
+    if (!iconSrc && item.icon) {
+      const iconNum = String(item.icon).padStart(6, '0');
+      const iconFolder = iconNum.slice(0, 3) + '000';
+      iconSrc = `${XIVAPI_ICON}/i/${iconFolder}/${iconNum}.png`;
+    }
+    return `
+      <div class="result-item" data-id="${item.id}" data-name="${escHtml(item.name)}" data-icon="${item.icon||''}" data-icon-url="${escHtml(iconSrc)}">
+        <div class="result-item__icon">
+          ${iconSrc ? `<img src="${iconSrc}" onerror="this.style.display='none'"/>` : ''}
+        </div>
+        <div class="result-item__info">
+          <div class="result-item__name">${escHtml(item.name)}</div>
+          <div class="result-item__sub">ID: ${item.id}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  container.querySelectorAll('.result-item').forEach(el => {
+    el.addEventListener('click', () => {
+      container.querySelectorAll('.result-item').forEach(r => r.classList.remove('selected'));
+      el.classList.add('selected');
+      modalCtx.selectedItem = {
+        name:    el.dataset.name,
+        icon:    el.dataset.icon,
+        iconUrl: el.dataset.iconUrl,
+      };
+      document.getElementById('modal-dye-row').style.display = 'flex';
+    });
+  });
 }
 
 function confirmItemSelection() {
@@ -510,8 +581,9 @@ function confirmItemSelection() {
   const dye2 = document.getElementById('dye2-input').value.trim();
 
   state.currentEdit[modalCtx.slotKey].items[modalCtx.slotName] = {
-    name: item.name,
-    icon: item.icon,
+    name:    item.name,
+    icon:    item.icon,
+    iconUrl: item.iconUrl || '',
     dye1, dye2,
   };
   // 위치 초기화 (새 아이템이면 기본 위치)
