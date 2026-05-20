@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>FF14 Lookbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Noto+Sans+KR:wght@300;400;500&family=Rajdhani:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<!-- html2canvas for download -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ── 사이드바 ── -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar__logo">
+    <span class="logo-crystal">✦</span>
+    <div>
+      <div class="logo-title">Lookbook</div>
+      <div class="logo-sub">Eorzea Glamour Archive</div>
+    </div>
+  </div>
+
+  <nav class="sidebar__nav">
+    <button class="nav-btn active" data-view="gallery">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+      갤러리
+    </button>
+    <button class="nav-btn" data-view="editor">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M11 2L14 5L6 13H3V10L11 2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+      새 룩 만들기
+    </button>
+  </nav>
+
+  <div class="sidebar__filter" id="filter-panel">
+    <p class="sidebar__section-label">필터</p>
+    <div class="filter-tabs">
+      <button class="filter-tab active" data-filter="all">전체</button>
+      <button class="filter-tab" data-filter="solo">솔로</button>
+      <button class="filter-tab" data-filter="pair">페어</button>
+    </div>
+  </div>
+
+  <div class="sidebar__looks" id="sidebar-looks"></div>
+</aside>
+
+<!-- ── 메인 ── -->
+<main class="main-area" id="main-area">
+
+  <!-- 갤러리 뷰 -->
+  <section class="view active" id="view-gallery">
+    <div class="gallery-header">
+      <h1 class="gallery-title">My Glamours</h1>
+      <button class="btn-primary" id="btn-new-look">+ 새 룩 추가</button>
+    </div>
+    <div class="gallery-grid" id="gallery-grid">
+      <div class="gallery-empty" id="gallery-empty">
+        <div class="empty-icon">✦</div>
+        <p>아직 룩이 없어요</p>
+        <button class="btn-primary" id="btn-new-look-empty">첫 번째 룩 만들기</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 에디터 뷰 -->
+  <section class="view" id="view-editor">
+    <div class="editor-layout">
+
+      <!-- 좌: 캔버스 -->
+      <div class="editor-canvas-wrap">
+        <div class="editor-topbar">
+          <button class="btn-ghost" id="btn-back">← 갤러리로</button>
+          <input class="look-name-input" id="look-name-input" type="text" placeholder="세트 이름을 입력하세요" maxlength="40"/>
+          <div class="editor-topbar-right">
+            <label class="toggle-label">
+              <span>페어</span>
+              <div class="toggle" id="pair-toggle">
+                <input type="checkbox" id="pair-check"/>
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+            <button class="btn-ghost" id="btn-download">↓ 저장</button>
+            <button class="btn-primary" id="btn-save">저장</button>
+          </div>
+        </div>
+
+        <div class="canvas-container" id="canvas-container">
+          <!-- 솔로 캔버스 -->
+          <div class="canvas solo-canvas" id="solo-canvas">
+            <div class="img-drop-zone" id="solo-drop">
+              <div class="drop-hint">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M16 4v16M8 12l8-8 8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 24h24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <p>클릭하거나 이미지를 드래그하세요</p>
+              </div>
+              <input type="file" accept="image/*" id="solo-file-input" style="display:none"/>
+              <img class="canvas-img" id="solo-img" style="display:none"/>
+            </div>
+            <!-- 글램 카드들이 여기에 생성됨 -->
+            <div class="glam-cards-layer" id="solo-cards-layer"></div>
+          </div>
+
+          <!-- 페어 캔버스 (숨김) -->
+          <div class="canvas pair-canvas" id="pair-canvas" style="display:none">
+            <div class="pair-slots">
+              <div class="pair-slot" id="pair-slot-left">
+                <div class="img-drop-zone" id="pair-drop-left">
+                  <div class="drop-hint"><svg width="24" height="24" viewBox="0 0 32 32" fill="none"><path d="M16 4v16M8 12l8-8 8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 24h24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><p>캐릭터 1</p></div>
+                  <input type="file" accept="image/*" id="pair-file-left" style="display:none"/>
+                  <img class="canvas-img" id="pair-img-left" style="display:none"/>
+                </div>
+                <div class="glam-cards-layer" id="pair-cards-left"></div>
+              </div>
+              <div class="pair-slot" id="pair-slot-right">
+                <div class="img-drop-zone" id="pair-drop-right">
+                  <div class="drop-hint"><svg width="24" height="24" viewBox="0 0 32 32" fill="none"><path d="M16 4v16M8 12l8-8 8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 24h24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><p>캐릭터 2</p></div>
+                  <input type="file" accept="image/*" id="pair-file-right" style="display:none"/>
+                  <img class="canvas-img" id="pair-img-right" style="display:none"/>
+                </div>
+                <div class="glam-cards-layer" id="pair-cards-right"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="canvas-hint">글램 카드를 드래그해서 위치를 조정할 수 있어요</div>
+      </div>
+
+      <!-- 우: 입력 패널 -->
+      <div class="editor-panel" id="editor-panel">
+        <div class="panel-tabs" id="panel-tabs">
+          <button class="panel-tab active" data-target="tab-solo">솔로</button>
+        </div>
+
+        <div class="panel-content" id="tab-solo">
+          <div class="char-meta-row">
+            <input class="meta-input" id="solo-char-name" type="text" placeholder="캐릭터 이름"/>
+            <input class="meta-input" id="solo-job" type="text" placeholder="직업/클래스"/>
+          </div>
+          <textarea class="desc-input" id="solo-desc" placeholder="세트 설명 (선택)" rows="2"></textarea>
+          <div class="slots-grid" id="slots-solo"></div>
+        </div>
+
+        <div class="panel-content" id="tab-left" style="display:none">
+          <div class="char-meta-row">
+            <input class="meta-input" id="left-char-name" type="text" placeholder="캐릭터 1 이름"/>
+            <input class="meta-input" id="left-job" type="text" placeholder="직업/클래스"/>
+          </div>
+          <div class="slots-grid" id="slots-left"></div>
+        </div>
+
+        <div class="panel-content" id="tab-right" style="display:none">
+          <div class="char-meta-row">
+            <input class="meta-input" id="right-char-name" type="text" placeholder="캐릭터 2 이름"/>
+            <input class="meta-input" id="right-job" type="text" placeholder="직업/클래스"/>
+          </div>
+          <div class="slots-grid" id="slots-right"></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- 아이템 검색 모달 -->
+<div class="modal-backdrop" id="item-modal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-slot-label">아이템 선택</span>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-search-row">
+      <input class="modal-search" id="modal-search-input" type="text" placeholder="아이템 이름으로 검색 (한국어/영어/일본어)"/>
+      <button class="btn-primary" id="modal-search-btn">검색</button>
+    </div>
+    <div class="modal-results" id="modal-results">
+      <div class="modal-hint">아이템 이름을 입력해서 검색하세요</div>
+    </div>
+    <div class="modal-dye-row" id="modal-dye-row" style="display:none">
+      <label class="dye-label">염색 1</label>
+      <input class="dye-input" id="dye1-input" type="text" placeholder="예: Jet Black"/>
+      <label class="dye-label">염색 2</label>
+      <input class="dye-input" id="dye2-input" type="text" placeholder="예: Storm Blue"/>
+      <button class="btn-primary" id="modal-confirm">선택 완료</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
