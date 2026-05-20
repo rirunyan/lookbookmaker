@@ -179,10 +179,20 @@
       <div class="modal-hint">아이템 이름을 입력해서 검색하세요</div>
     </div>
     <div class="modal-dye-row" id="modal-dye-row" style="display:none">
-      <label class="dye-label">염색 1</label>
-      <input class="dye-input" id="dye1-input" type="text" placeholder="예: Jet Black"/>
-      <label class="dye-label">염색 2</label>
-      <input class="dye-input" id="dye2-input" type="text" placeholder="예: Storm Blue"/>
+      <div class="dye-selects">
+        <div class="dye-group">
+          <label class="dye-label">염색 1</label>
+          <select class="dye-select" id="dye1-input">
+            <option value="">— 없음 —</option>
+          </select>
+        </div>
+        <div class="dye-group">
+          <label class="dye-label">염색 2</label>
+          <select class="dye-select" id="dye2-input">
+            <option value="">— 없음 —</option>
+          </select>
+        </div>
+      </div>
       <button class="btn-primary" id="modal-confirm">선택 완료</button>
     </div>
   </div>
