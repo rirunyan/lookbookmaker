@@ -480,34 +480,37 @@ async function searchItems(query) {
 
   const lang = detectLang(query);
 
-  // ── 1. 로컬 DB 검색 (items-*.json 있을 때) ──
+  // ── 1. 로컬 DB 검색 ──
   await loadItemDB();
-  if (ITEM_DB[lang]) {
+  if (ITEM_DB[lang] && ITEM_DB[lang].length > 0) {
     const q = query.toLowerCase();
     const hits = ITEM_DB[lang]
-      .filter(item => item.name.toLowerCase().includes(q))
+      .filter(item => item.name && item.name.toLowerCase().includes(q))
       .slice(0, 30);
 
     if (hits.length > 0) {
       renderResults(hits, results);
-      return;
+    } else {
+      results.innerHTML = `<div class="modal-hint">
+        "${query}" 검색 결과가 없어요.<br>
+        <small>다른 키워드로 시도해보세요. (예: 수호자 → 수호)</small>
+      </div>`;
     }
-    // 로컬 DB에 없으면 아래 온라인 fallback
+    return; // 로컬 DB 있으면 온라인 fallback 안 함
   }
 
-  // ── 2. 온라인 fallback (로컬 DB 없을 때) ──
-  results.innerHTML = '<div class="modal-loading">온라인 검색 중...<br><small style="color:#555">items-*.json 파일이 없어서 온라인으로 검색해요</small></div>';
+  // ── 2. 온라인 fallback (로컬 DB 없을 때만) ──
+  results.innerHTML = '<div class="modal-loading">온라인 검색 중...</div>';
   try {
     const items = await searchOnline(query, lang);
     if (items.length === 0) {
       results.innerHTML = `<div class="modal-hint">결과가 없어요.<br>
-        <small>💡 fetch-items.html을 실행하면 로컬 DB가 만들어져서<br>한국어 검색이 빠르고 정확해집니다.</small></div>`;
+        <small>💡 fetch-items.html을 실행하면 로컬 DB가 만들어집니다.</small></div>`;
       return;
     }
     renderResults(items, results);
   } catch(e) {
-    results.innerHTML = `<div class="modal-hint">검색 오류: ${e.message}<br>
-      <small>fetch-items.html로 로컬 DB를 먼저 만들어보세요.</small></div>`;
+    results.innerHTML = `<div class="modal-hint">검색 오류: ${e.message}</div>`;
   }
 }
 
