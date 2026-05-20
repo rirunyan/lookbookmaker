@@ -511,18 +511,20 @@ async function searchItems(query) {
   }
 }
 
-// 온라인 fallback — XIVAPI v1
+// 온라인 fallback — Teamcraft API (한국어 지원)
 async function searchOnline(query, lang) {
-  const langParam = { ko: 'Korean', ja: 'Japanese', en: 'English' }[lang] || 'English';
-  const url = `https://xivapi.com/search?string=${encodeURIComponent(query)}&indexes=Item&language=${langParam}&limit=20&columns=ID,Name,Icon`;
+  const url = `https://api.ffxivteamcraft.com/search?query=${encodeURIComponent(query)}&type=Item&sort=desc&lang=${lang}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return (data.Results || []).map(item => ({
-    id:   item.ID,
-    name: item.Name,
-    icon: item.Icon ? `https://xivapi.com${item.Icon}` : '',
-  }));
+  const results = Array.isArray(data) ? data : [];
+  return results.map(item => {
+    const id = item.itemId || item.id || item.ID;
+    const name = item[lang] || item.en || '';
+    const iconRaw = item.icon || '';
+    const icon = iconRaw.startsWith('/i/') ? `https://xivapi.com${iconRaw}` : iconRaw;
+    return { id, name, icon };
+  }).filter(i => i.id && i.name);
 }
 
 // 결과 렌더
