@@ -50,11 +50,7 @@ function loadFromStorage() {
 }
 
 function iconUrl(item) {
-  if (item.iconUrl) return item.iconUrl;
-  if (!item.icon) return null;
-  const num = String(item.icon).padStart(6, '0');
-  const folder = num.slice(0, 3) + '000';
-  return `${XIVAPI_ICON}/i/${folder}/${num}.png`;
+  return item.iconUrl || null;
 }
 
 // ── 기본 빈 룩 만들기 ────────────────────────────────────────
@@ -254,7 +250,7 @@ function renderSlotsFor(containerId, sideKey) {
       <div class="slot-row ${isFilled ? 'filled' : ''}" data-side="${sideKey}" data-slot="${slot}">
         <span class="slot-row__label">${slot}</span>
         <div class="slot-row__icon">
-          ${isFilled && (item.icon||item.iconUrl) ? `<img src="${iconUrl(item)}" onerror="this.style.display='none'"/>` : '＋'}
+          ${isFilled && item.iconUrl ? `<img src="${item.iconUrl}" onerror="this.style.display='none'" crossorigin="anonymous"/>` : '＋'}
         </div>
         <div class="slot-row__info">
           ${isFilled
@@ -349,8 +345,8 @@ function renderGlamCards(layerId, sideKey) {
 
       card.innerHTML = `
         <div class="glam-card__icon">
-          ${(item.icon||item.iconUrl)
-            ? `<img src="${iconUrl(item)}" onerror="this.parentElement.innerHTML='<div class=glam-card__icon-placeholder>${slot}</div>'"/>`
+          ${item.iconUrl
+            ? `<img src="${item.iconUrl}" crossorigin="anonymous" onerror="this.parentElement.innerHTML='<div class=glam-card__icon-placeholder>${slot}</div>'"/>`
             : `<div class="glam-card__icon-placeholder">${slot}</div>`}
         </div>
         <div class="glam-card__info">
@@ -447,13 +443,15 @@ function openItemModal(sideKey, slotName) {
   setTimeout(() => document.getElementById('modal-search-input').focus(), 50);
 }
 
-// 언어 감지: 한글 포함 여부
+// 언어 감지
 function detectLang(query) {
   if (/[\uAC00-\uD7A3]/.test(query)) return 'ko';
   if (/[\u3040-\u30FF\u4E00-\u9FFF]/.test(query)) return 'ja';
   return 'en';
 }
 
+// XIVAPI v2 — 현재 유일하게 안정적인 공개 FF14 API
+// 한국어: sheet 파라미터로 Korean 컬럼 지정
 async function searchItems(query) {
   if (!query.trim()) return;
   const results = document.getElementById('modal-results');
@@ -462,93 +460,86 @@ async function searchItems(query) {
   const lang = detectLang(query);
 
   try {
-    let items = [];
+    let items = await searchXivapiV2(query, lang);
 
-    if (lang === 'ko') {
-      // 한국어: XIVAPI 검색 사용 (한국어 지원)
-      items = await searchXivapi(query, 'Korean');
-      // 결과 없으면 영어로도 시도
-      if (items.length === 0) {
-        items = await searchGarland(query, 'en');
-      }
-    } else if (lang === 'ja') {
-      // 일본어: Garland ja + XIVAPI Japanese 병렬
-      const [g, x] = await Promise.allSettled([
-        searchGarland(query, 'ja'),
-        searchXivapi(query, 'Japanese'),
-      ]);
-      const gItems = g.status === 'fulfilled' ? g.value : [];
-      const xItems = x.status === 'fulfilled' ? x.value : [];
-      items = mergeResults(gItems, xItems);
-    } else {
-      // 영어: Garland 기본
-      items = await searchGarland(query, 'en');
+    // 한국어 결과 없으면 영어로 재시도
+    if (items.length === 0 && lang === 'ko') {
+      items = await searchXivapiV2(query, 'en');
     }
 
     if (items.length === 0) {
-      results.innerHTML = `<div class="modal-hint">결과가 없어요.<br>다른 키워드나 영어 이름으로 시도해보세요.</div>`;
+      results.innerHTML = `<div class="modal-hint">결과가 없어요.<br>검색 팁: 한국판 공식 이름으로 검색해보세요.<br>예) 뱅가드 스카우트 볼레로</div>`;
       return;
     }
 
     renderResults(items, results);
-
   } catch(e) {
-    results.innerHTML = '<div class="modal-hint">검색 오류. 잠시 후 다시 시도해주세요.</div>';
+    results.innerHTML = `<div class="modal-hint">검색 오류가 발생했어요.<br><small>${e.message}</small></div>`;
     console.error(e);
   }
 }
 
-// Garland Tools 검색
-async function searchGarland(query, lang) {
-  const url = `${GARLAND_SEARCH}?text=${encodeURIComponent(query)}&lang=${lang}&type=item`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data || []).slice(0, 20).map(item => ({
-    id:   item.id,
-    name: item.name,
-    icon: item.icon || '',
-    sub:  '',
-  }));
-}
+async function searchXivapiV2(query, lang) {
+  // XIVAPI v2 시트 검색 — 한/영/일 모두 지원
+  // 언어별 컬럼명: ko=Name_ko, ja=Name_ja, en=Name
+  const langMap = { ko: 'chs', ja: 'ja', en: 'en' };
+  // v2 엔드포인트: /v1/search (2024년 이후 공식)
+  const apiLang = langMap[lang] || 'en';
 
-// XIVAPI 검색 (한국어/일본어 지원)
-async function searchXivapi(query, language) {
-  // XIVAPI v2 search
-  const url = `https://xivapi.com/search?string=${encodeURIComponent(query)}&indexes=Item&language=${language}&limit=20`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const data = await res.json();
-  const hits = data.Results || [];
-  return hits.map(item => ({
-    id:   item.ID,
-    name: item.Name,
-    icon: item.Icon ? item.Icon.replace('/i/', '').replace('.png', '').replace(/\//g, '') : '',
-    iconUrl: item.Icon ? `https://xivapi.com${item.Icon}` : '',
-    sub: '',
-  }));
-}
+  // 방법1: v1/search (신규)
+  try {
+    const url = `https://v2.xivapi.com/api/1/search?query=${encodeURIComponent(query)}&sheets=Item&language=${apiLang}&limit=20`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const hits = data.results || [];
+      if (hits.length > 0) {
+        return hits.map(h => {
+          const fields = h.fields || {};
+          const name = fields.Name || fields.Name_en || h.id || '?';
+          const iconId = fields.Icon?.id || fields.Icon || null;
+          return {
+            id:     h.row_id || h.id,
+            name,
+            iconId,
+            iconUrl: iconId ? `https://v2.xivapi.com/api/1/asset/ui/icon/${String(iconId).slice(0,3)}000/${String(iconId).padStart(6,'0')}_hr1.tex?format=png` : '',
+          };
+        }).filter(i => i.name && i.name !== '?');
+      }
+    }
+  } catch(e) { console.warn('v2 search failed:', e); }
 
-// 중복 제거 병합 (id 기준)
-function mergeResults(a, b) {
-  const seen = new Set(a.map(i => i.id));
-  return [...a, ...b.filter(i => !seen.has(i.id))].slice(0, 20);
+  // 방법2: 구 XIVAPI v1 fallback
+  try {
+    const langParam = lang === 'ko' ? 'Korean' : lang === 'ja' ? 'Japanese' : 'English';
+    const url = `https://xivapi.com/search?string=${encodeURIComponent(query)}&indexes=Item&language=${langParam}&limit=20&columns=ID,Name,Icon`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const hits = data.Results || [];
+      return hits.map(item => ({
+        id:     item.ID,
+        name:   item.Name,
+        iconId: null,
+        iconUrl: item.Icon ? `https://xivapi.com${item.Icon}` : '',
+      })).filter(i => i.name);
+    }
+  } catch(e) { console.warn('xivapi v1 failed:', e); }
+
+  return [];
 }
 
 // 결과 DOM 렌더
 function renderResults(items, container) {
   container.innerHTML = items.map(item => {
-    // iconUrl이 있으면 직접 사용, 없으면 icon 번호로 조합
-    let iconSrc = item.iconUrl || '';
-    if (!iconSrc && item.icon) {
-      const iconNum = String(item.icon).padStart(6, '0');
-      const iconFolder = iconNum.slice(0, 3) + '000';
-      iconSrc = `${XIVAPI_ICON}/i/${iconFolder}/${iconNum}.png`;
-    }
+    const iconSrc = item.iconUrl || '';
     return `
-      <div class="result-item" data-id="${item.id}" data-name="${escHtml(item.name)}" data-icon="${item.icon||''}" data-icon-url="${escHtml(iconSrc)}">
+      <div class="result-item"
+        data-id="${item.id}"
+        data-name="${escHtml(item.name)}"
+        data-icon-url="${escHtml(iconSrc)}">
         <div class="result-item__icon">
-          ${iconSrc ? `<img src="${iconSrc}" onerror="this.style.display='none'"/>` : ''}
+          ${iconSrc ? `<img src="${iconSrc}" onerror="this.style.display='none'" crossorigin="anonymous"/>` : ''}
         </div>
         <div class="result-item__info">
           <div class="result-item__name">${escHtml(item.name)}</div>
@@ -563,7 +554,6 @@ function renderResults(items, container) {
       el.classList.add('selected');
       modalCtx.selectedItem = {
         name:    el.dataset.name,
-        icon:    el.dataset.icon,
         iconUrl: el.dataset.iconUrl,
       };
       document.getElementById('modal-dye-row').style.display = 'flex';
@@ -582,7 +572,6 @@ function confirmItemSelection() {
 
   state.currentEdit[modalCtx.slotKey].items[modalCtx.slotName] = {
     name:    item.name,
-    icon:    item.icon,
     iconUrl: item.iconUrl || '',
     dye1, dye2,
   };
