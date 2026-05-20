@@ -11,6 +11,64 @@
 // ── 상수 ─────────────────────────────────────────────────────
 const STORAGE_KEY = 'ff14_lookbook_v2';
 
+// FF14 공식 염료 목록
+const FF14_DYES = [
+  '— 없음 —',
+  // 기본 색상
+  'Soot Black','Pure White','Ash Grey','Goobbue Grey','Slate Grey',
+  'Charcoal Grey','Iron Grey','Gunmetal Black','Dark Steel Blue','Darkblood Red',
+  // 흰/회/검
+  'Jet Black','Snow White','Regal Purple','Pastel Purple','Dark Purple',
+  'Currant Purple','Iris Purple','Grape Purple','Grape Violet',
+  // 파랑
+  'Storm Blue','Void Blue','Royal Blue','Ceruleum Blue','Sky Blue',
+  'Seafog Blue','Woad Blue','Ink Blue','Rainclouds Grey',
+  // 초록
+  'Hunter Green','Ochu Green','Cactuar Green','Hunter Green',
+  'Meadow Green','Olive Green','Marsh Green','Lime Green',
+  'Moss Green','Celery Green','Cobalt Green',
+  // 노랑/주황
+  'Dalamud Red','Rust Red','Wine Red','Coral Pink','Rose Pink',
+  'Salmon Pink','Sunset Orange','Opo-opo Orange','Ochre Yellow',
+  'Gold Yellow','Honey Yellow','Millioncorn Yellow','Cream Yellow',
+  'Canary Yellow','Vanilla Yellow',
+  // 갈색/베이지
+  'Desert Yellow','Leather Brown','Acorn Brown','Bark Brown',
+  'Nut Brown','Loam Brown','Espresso Brown','Charcoal',
+  // 특수 염료 (금속)
+  'Metallic Silver','Metallic Gold','Metallic Blue','Metallic Red',
+  'Metallic Green','Metallic Orange','Metallic Purple','Metallic Sky Blue',
+  'Metallic Brass','Metallic Copper',
+  // 희귀/이벤트
+  'Shale Brown','Currant Purple','Grape Purple',
+];
+
+// 슬롯 → Teamcraft 카테고리 필터 (itemUICategory)
+// 검색 결과를 해당 슬롯에 맞는 장비만 보이게 필터링
+const SLOT_CATEGORIES = {
+  '머리':   ['Head'],
+  '몸통':   ['Body'],
+  '손':     ['Hands','Gloves'],
+  '다리':   ['Legs'],
+  '발':     ['Feet'],
+  '무기':   ['Gladiator\'s Arm','Pugilist\'s Arm','Marauder\'s Arm','Lancer\'s Arm',
+              'Archer\'s Arm','Conjurer\'s Arm','Thaumaturge\'s Arm','Carpenter\'s Primary Tool',
+              'Blacksmith\'s Primary Tool','Armorer\'s Primary Tool','Goldsmith\'s Primary Tool',
+              'Leatherworker\'s Primary Tool','Weaver\'s Primary Tool','Alchemist\'s Primary Tool',
+              'Culinarian\'s Primary Tool','Fisher\'s Primary Tool','Mining Tool','Botany Tool',
+              'Two-handed Conjurer\'s Arm','Two-handed Thaumaturge\'s Arm','Rogue\'s Arm',
+              'Dark Knight\'s Arm','Machinist\'s Arm','Astrologian\'s Arm','Samurai\'s Arm',
+              'Red Mage\'s Arm','Scholar\'s Arm','Dancer\'s Arm','Gunbreaker\'s Arm',
+              'Reaper\'s Arm','Sage\'s Arm','Viper\'s Arm','Pictomancer\'s Arm',
+              'Shield','Off-hand'],
+  '귀걸이': ['Earrings'],
+  '목걸이': ['Necklace'],
+  '팔찌':   ['Bracelets'],
+  '반지1':  ['Ring'],
+  '반지2':  ['Ring'],
+  '얼굴장식':['Head'],
+};
+
 // ── 로컬 아이템 DB ───────────────────────────────────────────
 // items-ko.json / items-en.json / items-ja.json 로드 상태
 const ITEM_DB = { ko: null, en: null, ja: null };
@@ -451,9 +509,15 @@ function openItemModal(sideKey, slotName) {
   document.getElementById('modal-search-input').value = '';
   document.getElementById('modal-results').innerHTML = '<div class="modal-hint">아이템 이름을 입력해서 검색하세요</div>';
   document.getElementById('modal-dye-row').style.display = 'none';
-  document.getElementById('dye1-input').value = '';
-  document.getElementById('dye2-input').value = '';
   document.getElementById('item-modal').style.display = 'flex';
+
+  // 염료 드롭다운 초기화
+  ['dye1-input','dye2-input'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = FF14_DYES.map(d =>
+      `<option value="${d === '— 없음 —' ? '' : d}">${d}</option>`
+    ).join('');
+  });
 
   // 기존 값 복원
   const existing = state.currentEdit[sideKey].items[slotName];
@@ -484,34 +548,48 @@ async function searchItems(query) {
   await loadItemDB();
   if (ITEM_DB[lang] && ITEM_DB[lang].length > 0) {
     const q = query.toLowerCase();
-    const hits = ITEM_DB[lang]
+    let hits = ITEM_DB[lang]
       .filter(item => item.name && item.name.toLowerCase().includes(q))
-      .slice(0, 30);
+      .slice(0, 50);
+
+    // 아이콘 URL을 hr1 고화질로 변환
+    hits = hits.map(item => ({
+      ...item,
+      icon: fixIconUrl(item.icon),
+    }));
 
     if (hits.length > 0) {
       renderResults(hits, results);
     } else {
       results.innerHTML = `<div class="modal-hint">
         "${query}" 검색 결과가 없어요.<br>
-        <small>다른 키워드로 시도해보세요. (예: 수호자 → 수호)</small>
+        <small>다른 키워드로 시도해보세요.</small>
       </div>`;
     }
-    return; // 로컬 DB 있으면 온라인 fallback 안 함
+    return;
   }
 
-  // ── 2. 온라인 fallback (로컬 DB 없을 때만) ──
+  // ── 2. 온라인 fallback ──
   results.innerHTML = '<div class="modal-loading">온라인 검색 중...</div>';
   try {
     const items = await searchOnline(query, lang);
     if (items.length === 0) {
-      results.innerHTML = `<div class="modal-hint">결과가 없어요.<br>
-        <small>💡 fetch-items.html을 실행하면 로컬 DB가 만들어집니다.</small></div>`;
+      results.innerHTML = `<div class="modal-hint">결과가 없어요.</div>`;
       return;
     }
-    renderResults(items, results);
+    renderResults(items.map(i => ({ ...i, icon: fixIconUrl(i.icon) })), results);
   } catch(e) {
     results.innerHTML = `<div class="modal-hint">검색 오류: ${e.message}</div>`;
   }
+}
+
+// xivapi 아이콘 URL을 고화질(_hr1) 버전으로 변환
+function fixIconUrl(url) {
+  if (!url) return '';
+  // 이미 hr1이면 그대로
+  if (url.includes('_hr1')) return url;
+  // /i/XXXXXX/YYYYYY.png → /i/XXXXXX/YYYYYY_hr1.png
+  return url.replace(/\/(\d+)\.png$/, '/$1_hr1.png');
 }
 
 // 온라인 fallback — Teamcraft API (한국어 지원)
@@ -569,15 +647,14 @@ function confirmItemSelection() {
     alert('아이템을 선택해주세요.');
     return;
   }
-  const dye1 = document.getElementById('dye1-input').value.trim();
-  const dye2 = document.getElementById('dye2-input').value.trim();
+  const dye1 = document.getElementById('dye1-input').value;
+  const dye2 = document.getElementById('dye2-input').value;
 
   state.currentEdit[modalCtx.slotKey].items[modalCtx.slotName] = {
     name:    item.name,
     iconUrl: item.iconUrl || '',
     dye1, dye2,
   };
-  // 위치 초기화 (새 아이템이면 기본 위치)
   if (!state.currentEdit[modalCtx.slotKey].cardPositions[modalCtx.slotName]) {
     const filledCount = Object.keys(state.currentEdit[modalCtx.slotKey].items).length - 1;
     state.currentEdit[modalCtx.slotKey].cardPositions[modalCtx.slotName] = {
@@ -585,7 +662,6 @@ function confirmItemSelection() {
       y: 16 + filledCount * 54,
     };
   }
-
   closeModal();
   renderSlots();
   renderCanvas();
